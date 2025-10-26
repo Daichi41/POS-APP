@@ -1,0 +1,343 @@
+﻿openapi: 3.0.3
+info:
+  title: Popup POS API
+  version: 0.1.0
+  description: |
+    MVP用POSアプリのAPI定義ドラフト。`reference/スクリーンショット (2402).png`
+    をベースに設計した。
+servers:
+  - url: https://api.pos-mvp.local/api/v1
+paths:
+  /auth/login:
+    post:
+      summary: デバイス+PINによるログイン
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/AuthInvalidPin'
+  /products/{barcode}:
+    get:
+      summary: バーコードで商品を検索
+      tags: [Products]
+      parameters:
+        - name: barcode
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 64
+      responses:
+        '200':
+          description: 商品情報を返却
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: 対象が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /products:
+    get:
+      summary: クエリで商品を検索
+      tags: [Products]
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: 商品リスト
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+  /transactions:
+    post:
+      summary: 取引登録
+      tags: [Transactions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRequest'
+      responses:
+        '201':
+          description: 取引登録完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '409':
+          description: 在庫不足など
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      summary: 取引一覧
+      tags: [Transactions]
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [completed, pending, voided]
+      responses:
+        '200':
+          description: 取引一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TransactionSummary'
+  /transactions/{id}/void:
+    post:
+      summary: 取引取消
+      tags: [Transactions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoidRequest'
+      responses:
+        '200':
+          description: 取消完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+  /sync/offline:
+    post:
+      summary: オフライン取引を同期
+      tags: [Sync]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfflineSyncRequest'
+      responses:
+        '202':
+          description: 同期を受け付け
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfflineSyncResponse'
+  /reports/daily:
+    get:
+      summary: 日次売上レポートを取得
+      tags: [Reports]
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: CSVを返却
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      required: [deviceId, pin]
+      properties:
+        deviceId:
+          type: string
+        pin:
+          type: string
+          minLength: 4
+          maxLength: 6
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        role:
+          type: string
+          enum: [staff, manager, admin]
+        expiresAt:
+          type: string
+          format: date-time
+    Product:
+      type: object
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        price:
+          type: integer
+        taxRate:
+          type: number
+          format: float
+        stock:
+          type: integer
+        barcode:
+          type: string
+    TransactionRequest:
+      type: object
+      required: [items, payment]
+      properties:
+        posId:
+          type: string
+        clerkId:
+          type: string
+        storeCode:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionItem'
+        payment:
+          $ref: '#/components/schemas/PaymentInfo'
+        total:
+          type: integer
+        totalExTax:
+          type: integer
+    TransactionItem:
+      type: object
+      required: [sku, name, unitPrice, quantity]
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        unitPrice:
+          type: integer
+        quantity:
+          type: integer
+        taxCode:
+          type: string
+          default: '10'
+        discount:
+          type: integer
+          nullable: true
+    PaymentInfo:
+      type: object
+      properties:
+        method:
+          type: string
+          enum: [cash, card]
+        amount:
+          type: integer
+        reference:
+          type: string
+          nullable: true
+    TransactionResponse:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [completed, offlineQueued]
+        total:
+          type: integer
+        totalExTax:
+          type: integer
+    TransactionSummary:
+      type: object
+      properties:
+        transactionId:
+          type: string
+        clerkId:
+          type: string
+        total:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+    VoidRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+        managerPin:
+          type: string
+    OfflineSyncRequest:
+      type: object
+      properties:
+        deviceId:
+          type: string
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionRequest'
+    OfflineSyncResponse:
+      type: object
+      properties:
+        accepted:
+          type: integer
+        failed:
+          type: integer
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/Error'
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+  responses:
+    AuthInvalidPin:
+      description: PINが不正
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
